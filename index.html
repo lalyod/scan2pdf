@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' data:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self' blob:">
+<title>Private Scan to PDF</title>
+<meta name="theme-color" content="#f4f5fb">
+<script>
+// Runs before first paint so there is no light/dark flash. Choice = saved one, else the OS setting.
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  document.querySelector('meta[name=theme-color]').content = t === 'dark' ? '#0a0b11' : '#f4f5fb';
+}
+(function () {
+  let t; try { t = localStorage.getItem('theme'); } catch (e) {}
+  applyTheme(t === 'light' || t === 'dark' ? t : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+})();
+</script>
+<link rel="stylesheet" href="tailwind.css?v=12"><!-- bump v after rebuilding tailwind.css so browsers don't keep an old copy -->
+
+</head>
+<body class="bg-bg font-sans text-fg">
+<main class="mx-auto max-w-[880px] px-4 pb-[120px] pt-6">
+  <header class="mb-8 flex items-start justify-between gap-3">
+    <div class="flex flex-col items-start gap-3">
+      <div class="flex items-center gap-3">
+        <div class="grid size-11 place-items-center rounded-2xl text-on shadow-glow [background-image:var(--grad)]" data-i="doc"></div>
+        <h1 class="text-3xl font-extrabold leading-tight tracking-tight">Scan to PDF</h1>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <button id="howbtn" class="btn !min-h-11 gap-1.5 !rounded-xl !px-3.5 text-sm shadow-card max-[480px]:!px-0 max-[480px]:size-11" aria-label="How to use"><span data-i="help"></span><span class="max-[480px]:hidden">How to use</span></button>
+      <button id="theme" class="ib !size-11 border border-line bg-surface shadow-card" aria-label="Switch to dark mode">
+        <span data-i="moon" class="[[data-theme=dark]_&]:hidden"></span><span data-i="sun" class="hidden [[data-theme=dark]_&]:block"></span>
+      </button>
+    </div>
+  </header>
+
+  <p id="msg" role="status" class="mb-4 rounded-2xl border border-[color-mix(in_srgb,var(--danger)_40%,var(--line))] bg-[color-mix(in_srgb,var(--danger)_8%,var(--surface))] px-4 py-3 text-[15px] text-fg" hidden></p>
+
+  <section id="empty" class="flex flex-col items-center gap-3 rounded-[2rem] border border-line bg-surface px-6 py-16 text-center shadow-card transition [&.over]:border-accent [&.over]:bg-soft">
+    <div class="mb-2 grid size-20 place-items-center rounded-3xl text-on shadow-glow [background-image:var(--grad)] [&_svg]:size-9" data-i="scan"></div>
+    <h2 class="text-3xl font-extrabold tracking-tight">Scan a document</h2>
+    <p class="mb-4 max-w-[36ch] text-muted">Use your camera or add photos. Edges are detected automatically, then you save everything as one PDF.</p>
+    <div class="flex flex-wrap justify-center gap-3">
+      <button class="btn btn-primary" id="scan"><span data-i="camera"></span>Scan with camera</button>
+      <button class="btn" id="add0"><span data-i="image"></span>Choose images</button>
+    </div>
+    <ul class="m-0 mt-5 flex list-none flex-wrap justify-center gap-2 p-0 text-sm text-muted">
+      <li class="rounded-full border border-line bg-tile px-3 py-1.5">Auto edge detection</li>
+      <li class="rounded-full border border-line bg-tile px-3 py-1.5">Drop images anywhere</li>
+      <li class="rounded-full border border-line bg-tile px-3 py-1.5">Never leaves your device</li>
+    </ul>
+  </section>
+
+  <label id="namebox" class="mb-4 flex items-center rounded-2xl border border-line bg-surface pr-4 shadow-card transition focus-within:border-accent focus-within:shadow-ring" hidden>
+    <input id="name" class="min-h-12 min-w-0 flex-1 bg-transparent px-4 text-lg font-bold tracking-tight text-fg placeholder:font-semibold placeholder:text-muted focus:outline-none" placeholder="scan" maxlength="80" aria-label="PDF name" autocomplete="off"><span class="font-semibold text-muted">.pdf</span>
+  </label>
+  <ul id="list" class="relative m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-0" hidden></ul>
+</main>
+
+<input id="files" type="file" accept="image/*" multiple hidden>
+
+<div id="bar" class="fixed inset-x-3 bottom-[calc(12px+env(safe-area-inset-bottom))] z-[5] mx-auto max-w-[856px] rounded-3xl border border-line bg-[color-mix(in_srgb,var(--surface)_78%,transparent)] p-2.5 shadow-card backdrop-blur-[16px]" hidden>
+  <div class="flex items-center gap-1.5 min-[481px]:gap-2">
+    <details id="add" class="relative">
+      <summary class="btn list-none max-[480px]:px-3.5 [&::-webkit-details-marker]:hidden" aria-label="Add image"><span data-i="plus"></span><span class="max-[480px]:hidden">Add image</span></summary>
+      <div class="absolute bottom-full left-0 mb-2 grid w-52 gap-1 rounded-2xl border border-line bg-surface p-1.5 shadow-card">
+        <button class="btn justify-start border-transparent" id="addup"><span data-i="image"></span>Add uploaded</button>
+        <button class="btn justify-start border-transparent" id="addscan"><span data-i="camera"></span>Scan new</button>
+      </div>
+    </details>
+    <button class="btn btn-ghost max-[480px]:px-3.5" id="clear" aria-label="Clear all pages"><span data-i="trash"></span><span class="max-[480px]:hidden">Clear</span></button>
+    <button class="btn btn-primary flex-1 max-[480px]:px-3.5" id="pdf"><span data-i="download"></span><span id="pdfn">Download PDF</span></button>
+  </div>
+</div>
+
+<div id="cam" role="dialog" aria-label="Camera scanner" class="fixed inset-0 z-[9] hidden flex-col bg-[#050608] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] text-white [&.on]:flex [&_:focus-visible]:outline-white">
+  <div id="view" class="relative grid min-h-0 flex-1 place-items-center p-3">
+    <div id="frame" class="relative overflow-hidden rounded-[18px] bg-black"><video id="vid" class="absolute inset-0 h-full w-full" playsinline muted></video><canvas id="ov" class="absolute inset-0 h-full w-full"></canvas></div>
+    <p id="hint" role="status" class="absolute left-1/2 top-5 z-[2] m-0 max-w-[calc(100%-32px)] -translate-x-1/2 rounded-full bg-[rgba(20,22,30,.72)] px-4 py-2 text-center text-sm backdrop-blur-[10px]">Starting camera…</p>
+  </div>
+  <div class="grid grid-cols-[1fr_auto_1fr] items-center px-6 pb-5 pt-3">
+    <button id="done" class="inline-flex min-h-11 cursor-pointer items-center gap-2 justify-self-start px-1 font-semibold text-white"><span data-i="close"></span>Done <span id="cnt" class="grid h-6 min-w-6 place-items-center rounded-full bg-accent px-[7px] text-[13px] text-on" hidden></span></button>
+    <button id="snap" aria-label="Capture page" class="size-[72px] cursor-pointer rounded-full border-4 border-white p-1 transition active:scale-[.92] after:block after:size-full after:rounded-full after:bg-white"></button>
+    <span></span>
+  </div>
+</div>
+
+<div id="rev" role="dialog" aria-label="Crop preview" class="fixed inset-0 z-[9] hidden flex-col bg-[#050608] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] text-white [&.on]:flex [&_:focus-visible]:outline-white">
+  <div id="rview" class="relative grid min-h-0 flex-1 place-items-center p-3">
+    <canvas id="rc" class="max-w-full cursor-crosshair touch-none rounded-xl"></canvas>
+    <p id="rtitle" role="status" class="absolute left-1/2 top-5 z-[2] m-0 max-w-[calc(100%-32px)] -translate-x-1/2 rounded-full bg-[rgba(20,22,30,.72)] px-4 py-2 text-center text-sm backdrop-blur-[10px]"></p>
+  </div>
+  <div class="flex flex-wrap justify-center gap-2 px-6 pb-5 pt-3">
+    <button class="btn btn-ghost !text-white" id="rskip">Skip</button>
+    <button class="btn" id="rfull">Use full image</button>
+    <button class="btn btn-primary" id="rok"><span data-i="crop"></span>Crop &amp; add</button>
+  </div>
+</div>
+
+<div id="pv" role="dialog" aria-label="Page preview" class="invisible fixed inset-0 z-[9] flex flex-col bg-[#050608] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] text-white opacity-0 transition-[opacity,visibility] duration-200 [&.on]:visible [&.on]:opacity-100 [&_:focus-visible]:outline-white">
+  <div id="pvbox" class="relative grid min-h-0 flex-1 place-items-center p-3">
+    <canvas id="pc" class="scale-95 rounded-lg bg-white shadow-2xl transition-transform duration-200 [.on_&]:scale-100"></canvas>
+    <p id="ptitle" role="status" class="absolute left-1/2 top-5 z-[2] m-0 -translate-x-1/2 rounded-full bg-[rgba(20,22,30,.72)] px-4 py-2 text-center text-sm backdrop-blur-[10px]"></p>
+  </div>
+  <div class="flex flex-wrap justify-center gap-3 px-6 pb-5 pt-3">
+    <button class="btn" id="ptoggle" hidden></button>
+    <button class="btn" id="pclose"><span data-i="close"></span>Close</button>
+  </div>
+</div>
+
+<dialog id="how" aria-labelledby="howt" class="m-auto max-h-[85vh] w-[min(520px,calc(100vw-32px))] overflow-auto rounded-3xl border border-line bg-surface p-0 text-fg shadow-card backdrop:bg-[color-mix(in_srgb,var(--bg)_60%,transparent)] backdrop:backdrop-blur-sm">
+  <div class="flex items-center justify-between gap-3 px-6 pb-2 pt-6">
+    <h2 id="howt" class="m-0 text-2xl font-extrabold tracking-tight">How to use</h2>
+    <button class="ib" id="howx" aria-label="Close"><span data-i="close"></span></button>
+  </div>
+  <ol class="m-0 grid list-none gap-5 p-6 pt-3">
+    <li class="grid grid-cols-[28px_1fr] gap-3"><b class="grid size-7 place-items-center rounded-full text-sm text-on [background-image:var(--grad)]">1</b><p class="m-0"><b>Add pages.</b> <span class="text-muted">Scan with the camera: the page edges are outlined, tap the shutter for each page, then press Done. Or choose images, or drop them anywhere on the page.</span></p></li>
+    <li class="grid grid-cols-[28px_1fr] gap-3"><b class="grid size-7 place-items-center rounded-full text-sm text-on [background-image:var(--grad)]">2</b><p class="m-0"><b>Check the crop.</b> <span class="text-muted">The rectangle shows what will be kept. Adjust it, then press Crop &amp; add. Use full image keeps everything; Skip drops the photo.</span></p></li>
+    <li class="grid grid-cols-[28px_1fr] gap-3"><b class="grid size-7 place-items-center rounded-full text-sm text-on [background-image:var(--grad)]">3</b><p class="m-0"><b>Arrange.</b> <span class="text-muted">Press and hold a page, then drag it to a new place. Tap a page to preview it and switch between cropped and original. The bin removes it.</span></p></li>
+    <li class="grid grid-cols-[28px_1fr] gap-3"><b class="grid size-7 place-items-center rounded-full text-sm text-on [background-image:var(--grad)]">4</b><p class="m-0"><b>Name it and download.</b> <span class="text-muted">Type a file name, then press Download PDF. Use Add image to put more pages in the same PDF.</span></p></li>
+  </ol>
+  <div class="flex items-center justify-end border-t border-line px-6 py-4">
+    <button class="btn btn-primary" id="howok">Got it</button>
+  </div>
+</dialog>
+
+<div id="busy" aria-live="polite" class="invisible fixed inset-0 z-[20] grid place-items-center bg-[color-mix(in_srgb,var(--bg)_60%,transparent)] opacity-0 backdrop-blur-sm transition-[opacity,visibility] duration-200 [&.on]:visible [&.on]:opacity-100">
+  <div class="flex w-[min(320px,calc(100vw-48px))] flex-col items-center gap-4 rounded-3xl border border-line bg-surface p-7 text-center shadow-card [.on_&]:animate-rise">
+    <span class="block size-12 animate-spin rounded-full border-4 border-line border-t-accent"></span>
+    <div class="grid w-full gap-1">
+      <p id="busyt" class="m-0 text-lg font-bold tracking-tight"></p>
+      <p id="busys" class="m-0 text-sm text-muted" hidden></p>
+    </div>
+    <div id="busyp" class="h-1.5 w-full overflow-hidden rounded-full bg-tile" hidden><div id="busyb" class="h-full w-0 rounded-full transition-[width] duration-300 [background-image:var(--grad)]"></div></div>
+  </div>
+</div>
+<script src="jspdf.umd.min.js"></script>
+<script src="jscanify.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const pages = [];            // {id, orig, crop, use} - canvases live only in memory
+let scan, cvReady, stream, timer, pid = 0, pvFit;
+
+// Inline icons (stroke paths), so there are no image or font requests.
+const ICONS = {
+  doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  scan: '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M4 12h16"/>',
+  camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5-9 9"/>',
+  download: '<path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14"/>',
+  full: '<rect x="3" y="3" width="18" height="18" rx="2"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5M12 17h.01"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'
+};
+const svg = n => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
+document.querySelectorAll('[data-i]').forEach(e => e.innerHTML = svg(e.dataset.i));
+
+// say(): error / info pill. busy(): full-screen working card with optional sub-text and progress (0..1); busy(false) hides it.
+const say = t => { $('msg').textContent = t; $('msg').hidden = !t; };
+function busy(text, frac, sub = '') {
+  $('busy').classList.toggle('on', !!text);
+  if (!text) return;
+  $('busyt').textContent = text; $('busys').textContent = sub; $('busys').hidden = !sub;
+  $('busyp').hidden = frac == null; $('busyb').style.width = (frac ?? 0) * 100 + '%';
+}
+const frame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r)));   // let the browser paint before heavy synchronous work
+const cur = p => p.use && p.crop ? p.crop : p.orig;
+
+// OpenCV is big (~9 MB), so load it only when first needed.
+function loadCV() {
+  return cvReady ||= new Promise((ok, bad) => {
+    const s = document.createElement('script');
+    s.src = 'opencv.js';
+    s.onerror = () => bad(new Error('Could not load opencv.js'));
+    s.onload = () => { if (window.cv && cv.Mat) ok(); else cv.onRuntimeInitialized = ok; };
+    document.head.append(s);
+  }).then(() => scan = new jscanify());
+}
+
+// Finds the page quad (corners in src coordinates) or null if it doesn't look like a document.
+function detect(src, maxW) {
+  const k = Math.min(1, maxW / src.width), s = document.createElement('canvas');
+  s.width = Math.round(src.width * k); s.height = Math.round(src.height * k);
+  s.getContext('2d').drawImage(src, 0, 0, s.width, s.height);
+  const m = cv.imread(s), c = scan.findPaperContour(m);
+  let r = null;
+  if (c) {
+    const a = cv.contourArea(c) / (s.width * s.height), p = scan.getCornerPoints(c);
+    // shortcut: area 15–98% of frame = "looks like a page"; tune if detection is too eager/shy
+    if (a > .15 && a < .98 && p.topLeftCorner && p.topRightCorner && p.bottomLeftCorner && p.bottomRightCorner)
+      r = Object.fromEntries(Object.entries(p).map(([n, q]) => [n, { x: q.x / k, y: q.y / k }]));
+    c.delete();
+  }
+  m.delete();
+  return r;
+}
+
+function flatten(src, q) {
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  let w = Math.max(d(q.topLeftCorner, q.topRightCorner), d(q.bottomLeftCorner, q.bottomRightCorner));
+  let h = Math.max(d(q.topLeftCorner, q.bottomLeftCorner), d(q.topRightCorner, q.bottomRightCorner));
+  const k = Math.min(1, 2000 / Math.max(w, h));
+  return scan.extractPaper(src, Math.round(w * k), Math.round(h * k), q);
+}
+
+// q: undefined = auto-detect, false = no crop, or a corner quad chosen by the user.
+async function addPage(orig, q) {
+  await loadCV();
+  if (q === undefined) q = detect(orig, 640);
+  pages.push({ id: ++pid, fresh: true, orig, crop: q ? flatten(orig, q) : null, use: true });
+  render();
+  return !!q;
+}
+
+function render() {
+  const ul = $('list'), n = pages.length; ul.replaceChildren();
+  pages.forEach((p, i) => {
+    const li = document.createElement('li'), c = cur(p), t = document.createElement('canvas');
+    li.className = 'relative flex select-none flex-col gap-2 rounded-3xl border border-line bg-surface p-3 shadow-card transition-[border-color] hover:border-[color-mix(in_srgb,var(--accent)_45%,var(--line))] [-webkit-touch-callout:none]';
+    if (p.fresh) { li.classList.add('animate-rise'); delete p.fresh; }     // only newly added cards animate in
+    li.onpointerdown = e => hold(e, li); li.oncontextmenu = e => e.preventDefault();   // long-press must not open the phone's image menu
+    t.className = 'aspect-square w-full rounded-2xl bg-tile';
+    t.width = 300; t.height = 300;
+    const g = t.getContext('2d'), k = Math.min(300 / c.width, 300 / c.height);
+    g.drawImage(c, (300 - c.width * k) / 2, (300 - c.height * k) / 2, c.width * k, c.height * k);
+    const tb = document.createElement('button');          // thumbnail = button, so click / Enter opens the preview
+    tb.className = 'block cursor-zoom-in rounded-2xl transition-transform hover:scale-[1.02]';
+    tb.ariaLabel = `Preview page ${i + 1}. Hold and drag, or use arrow keys, to reorder`; tb.title = 'Click to preview · hold and drag to reorder';
+    tb.onclick = () => dropped || openPreview(i); tb.append(t);       // a drag ends with a click on the thumbnail: ignore it
+    tb.onkeydown = e => {
+      const d = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+      if (!d || i + d < 0 || i + d >= n) return;
+      e.preventDefault();
+      animateOrder(() => { [pages[i], pages[i + d]] = [pages[i + d], pages[i]]; render(); });
+      ul.querySelector(`li[data-id="${p.id}"] button`).focus();
+    };
+    const num = document.createElement('span'); num.textContent = i + 1;
+    num.className = 'absolute left-5 top-5 grid h-7 min-w-7 place-items-center rounded-full border border-line bg-[color-mix(in_srgb,var(--surface)_82%,transparent)] px-2 text-[13px] font-bold text-fg shadow-card backdrop-blur-sm';
+    const row = document.createElement('div'); row.className = 'flex justify-end gap-1';
+    const btn = (icon, label, fn, off, cls = '') => {
+      const b = document.createElement('button');
+      b.className = 'ib ' + cls; b.innerHTML = svg(icon);
+      b.title = b.ariaLabel = `${label} (page ${i + 1})`; b.disabled = !!off;
+      b.onclick = fn; row.append(b); return b;
+    };
+    li.dataset.id = p.id;
+    btn('trash', 'Remove', () => confirm(`Remove page ${i + 1}? This can't be undone.`) && animateOrder(() => { pages.splice(i, 1); render(); }), false,
+      'opacity-70 hover:enabled:opacity-100 hover:enabled:bg-[color-mix(in_srgb,var(--danger)_14%,transparent)] hover:enabled:text-danger');
+    li.append(tb, num, row); ul.append(li);
+  });
+  $('empty').hidden = n > 0; ul.hidden = !n; $('bar').hidden = !n; $('namebox').hidden = !n;
+  $('pdfn').innerHTML = `<span class="max-[480px]:hidden">Download </span>PDF${n ? ` (${n})` : ''}`;
+  $('cnt').hidden = !n; $('cnt').textContent = n;
+}
+
+// ---- reorder: animated drag & drop ----
+const EASE = 'transform 220ms cubic-bezier(.2,.8,.2,1)', LIFT = 'scale(1.05) rotate(1.5deg)';
+
+// FLIP: note where every card is, run fn() (reorders / re-renders), then slide each card from its old spot to its new one.
+// `skip` = card that follows the pointer (not animated); `lifted` = id of a dropped card that should also settle out of LIFT.
+function animateOrder(fn, { skip, lifted } = {}) {
+  const ul = $('list'), mid = r => [r.left + r.width / 2, r.top + r.height / 2];
+  const before = new Map([...ul.children].map(li => [li.dataset.id, mid(li.getBoundingClientRect())]));
+  fn();
+  for (const li of ul.children) {
+    const a = before.get(li.dataset.id);
+    if (!a || li === skip) continue;
+    const b = mid(li.getBoundingClientRect()), tf = `translate(${a[0] - b[0]}px,${a[1] - b[1]}px)`;
+    if (li.dataset.id !== lifted && Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) < 1) continue;
+    li.style.transition = 'none'; li.style.transform = li.dataset.id === lifted ? `${tf} ${LIFT}` : tf;
+    li.getBoundingClientRect();                 // force reflow so the change below animates
+    li.style.transition = EASE; li.style.transform = '';
+    setTimeout(() => li.style.transition = '', 260);
+  }
+}
+
+// Press and hold a card (~0.35 s) to pick it up. Moving before that = the user is scrolling or clicking, so do nothing.
+let dropped = false;
+function hold(e, li) {
+  if (e.button > 0 || pages.length < 2 || e.target.closest('.ib')) return;
+  let x = e.clientX, y = e.clientY;
+  const stop = () => { clearTimeout(t); removeEventListener('pointermove', slip); removeEventListener('pointerup', stop); removeEventListener('pointercancel', stop); };
+  const slip = ev => { x = ev.clientX; y = ev.clientY; if (Math.hypot(x - e.clientX, y - e.clientY) > 8) stop(); };
+  const t = setTimeout(() => { stop(); navigator.vibrate?.(12); startDrag(x, y, li); }, 350);
+  addEventListener('pointermove', slip); addEventListener('pointerup', stop); addEventListener('pointercancel', stop);
+}
+
+function startDrag(x0, y0, li) {
+  const ul = $('list'), r0 = li.getBoundingClientRect(), gx = x0 - r0.left, gy = y0 - r0.top;
+  let lastSwap = 0;
+  const noScroll = ev => ev.preventDefault();    // finger is holding a card: moving it must not scroll the page
+  addEventListener('touchmove', noScroll, { passive: false });
+  li.classList.add('z-10', '!shadow-2xl'); document.body.classList.add('select-none', 'cursor-grabbing');
+
+  const follow = ev => {                         // card follows the pointer, whatever slot it currently sits in
+    const r = ul.getBoundingClientRect();
+    li.style.transition = 'none';
+    li.style.transform = `translate(${ev.clientX - gx - r.left - li.offsetLeft}px,${ev.clientY - gy - r.top - li.offsetTop}px) ${LIFT}`;
+  };
+  const move = ev => {
+    follow(ev);
+    const over = [...ul.children].find(o => { const r = o.getBoundingClientRect();
+      return o !== li && ev.clientX > r.left && ev.clientX < r.right && ev.clientY > r.top && ev.clientY < r.bottom; });
+    if (!over || performance.now() - lastSwap < 150) return;   // cooldown stops flip-flopping while neighbours slide
+    lastSwap = performance.now();
+    animateOrder(() => li.compareDocumentPosition(over) & Node.DOCUMENT_POSITION_FOLLOWING ? over.after(li) : over.before(li), { skip: li });
+    follow(ev);
+  };
+  const end = () => {
+    removeEventListener('touchmove', noScroll); dropped = true; setTimeout(() => dropped = false, 50);
+    removeEventListener('pointermove', move); removeEventListener('pointerup', end); removeEventListener('pointercancel', end);
+    document.body.classList.remove('select-none', 'cursor-grabbing');
+    const order = [...ul.children].map(o => +o.dataset.id);
+    animateOrder(() => { pages.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)); render(); }, { lifted: li.dataset.id });
+  };
+  follow({ clientX: x0, clientY: y0 });          // lift right away so the user sees the card was picked up
+  addEventListener('pointermove', move); addEventListener('pointerup', end); addEventListener('pointercancel', end);
+}
+
+// ---- page preview ----
+function openPreview(i) {
+  const p = pages[i], pc = $('pc'), tg = $('ptoggle');
+  $('ptitle').textContent = `Page ${i + 1} of ${pages.length}`;
+  const show = () => {                           // draws whichever version (cropped / original) the page currently uses
+    const c = cur(p);
+    pc.width = c.width; pc.height = c.height; pc.getContext('2d').drawImage(c, 0, 0);
+    pvFit = () => {                              // contain-fit, same idea as the crop screen
+      const box = $('pvbox'), k = Math.min((box.clientWidth - 24) / c.width, (box.clientHeight - 24) / c.height);
+      pc.style.width = c.width * k + 'px'; pc.style.height = c.height * k + 'px';
+    };
+    pvFit();
+    tg.hidden = !p.crop;                         // only pages with a detected / chosen crop have something to switch
+    tg.innerHTML = svg(p.use ? 'full' : 'crop') + (p.use ? 'Use original' : 'Use cropped');
+  };
+  tg.onclick = () => { p.use = !p.use; show(); render(); };   // render() refreshes the card thumbnail behind the overlay
+  $('pv').classList.add('on'); show();
+  setTimeout(() => $('pclose').focus(), 30);     // overlay is still visibility:hidden for the first frame, so focus right after would fail
+  $('pv').dataset.from = pages[i].id;
+}
+function closePreview() {
+  $('pv').classList.remove('on'); pvFit = null;
+  $('list').querySelector(`li[data-id="${$('pv').dataset.from}"] button`)?.focus();   // first button = the thumbnail
+}
+$('pclose').onclick = closePreview;
+$('pvbox').onclick = e => { if (e.target === e.currentTarget) closePreview(); };
+addEventListener('keydown', e => e.key === 'Escape' && $('pv').classList.contains('on') && closePreview());
+addEventListener('resize', () => pvFit?.());
+
+// ---- how to use ----
+$('howbtn').onclick = () => $('how').showModal();
+$('howx').onclick = $('howok').onclick = () => $('how').close();
+$('how').onclick = e => e.target === e.currentTarget && e.currentTarget.close();   // click on the backdrop
+
+// ---- camera ----
+function stopCam() {
+  clearTimeout(timer); timer = null;
+  stream?.getTracks().forEach(t => t.stop()); stream = null;
+  $('vid').srcObject = null; $('cam').classList.remove('on');
+}
+
+// Size the preview to the video's aspect ratio, as large as fits; the overlay canvas shares that box.
+function fit() {
+  const v = $('vid'), box = $('view'), f = $('frame');
+  if (!v.videoWidth) return;
+  const k = Math.min((box.clientWidth - 24) / v.videoWidth, (box.clientHeight - 24) / v.videoHeight);
+  f.style.width = v.videoWidth * k + 'px'; f.style.height = v.videoHeight * k + 'px';
+}
+addEventListener('resize', fit);
+
+function live() {
+  const v = $('vid'), o = $('ov');
+  if (!stream) return;
+  if (v.videoWidth) {
+    const q = detect(grab(), 320);
+    o.width = v.videoWidth; o.height = v.videoHeight;
+    const g = o.getContext('2d');
+    if (q) {
+      g.strokeStyle = '#34d399'; g.fillStyle = 'rgba(52,211,153,.18)'; g.lineJoin = 'round';
+      g.lineWidth = Math.max(4, v.videoWidth / 150); g.beginPath();
+      [q.topLeftCorner, q.topRightCorner, q.bottomRightCorner, q.bottomLeftCorner].forEach((p, n) => n ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y));
+      g.closePath(); g.fill(); g.stroke();
+    }
+    $('hint').textContent = q ? 'Document found — tap the shutter' : 'Point at a document on a contrasting surface';
+  }
+  timer = setTimeout(live, 250);
+}
+
+function grab() {
+  const v = $('vid'), c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  return c;
+}
+
+async function openCam() {
+  if (!navigator.mediaDevices?.getUserMedia) return say('Camera needs a secure (https) page. You can still add images.');
+  say('');
+  try {
+    if (!cvReady) busy('Loading scanner…', null, 'First time only');
+    await loadCV(); busy('Starting camera…', null, 'Allow camera access if asked');
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } } });
+    const v = $('vid');
+    v.srcObject = stream; await v.play();
+    $('cam').classList.add('on'); fit(); live();
+  } catch (e) { stopCam(); say(`Camera unavailable (${e.name || e.message}). You can still add images.`); }
+  finally { busy(false); }
+}const closeMenu = fn => () => { $('add').open = false; fn(); };      // the "Add image" menu in the bottom bar
+$('scan').onclick = openCam;
+$('addscan').onclick = closeMenu(openCam);
+addEventListener('click', e => $('add').contains(e.target) || ($('add').open = false));   // click elsewhere closes the menu
+
+$('snap').onclick = async () => {
+  $('hint').textContent = 'Processing page…';
+  const found = await addPage(grab());
+  $('hint').textContent = `Page ${pages.length} added${found ? '' : ' (no document edges found — full frame kept)'}`;
+};
+$('done').onclick = stopCam;
+addEventListener('pagehide', stopCam);
+
+// ---- crop preview ----
+const KEYS = ['topLeftCorner', 'topRightCorner', 'bottomRightCorner', 'bottomLeftCorner'];
+let revFit;
+addEventListener('resize', () => revFit?.());
+
+const inset = (w, h, m = .05) => ({
+  topLeftCorner: { x: w * m, y: h * m }, topRightCorner: { x: w * (1 - m), y: h * m },
+  bottomRightCorner: { x: w * (1 - m), y: h * (1 - m) }, bottomLeftCorner: { x: w * m, y: h * (1 - m) }
+});
+
+// Shows the image with a draggable crop quad. Resolves to a quad, false (use full image) or null (skip).
+// shortcut: no convexity check, so dragging corners into a crossed shape warps badly; add one if users hit it.
+function review(img, quad, i, n) {
+  return new Promise(res => {
+    const rev = $('rev'), rc = $('rc'), g = rc.getContext('2d');
+    const pts = KEYS.map(k => ({ ...quad[k] }));
+    let k = 1, drag = -1;
+
+    const draw = () => {
+      const W = rc.width, H = rc.height, P = pts.map(p => [p.x * k, p.y * k]);
+      g.clearRect(0, 0, W, H); g.drawImage(img, 0, 0, W, H);
+      g.beginPath(); g.rect(0, 0, W, H);
+      P.forEach(([x, y], j) => j ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath();
+      g.fillStyle = 'rgba(0,0,0,.5)'; g.fill('evenodd');
+      g.beginPath(); P.forEach(([x, y], j) => j ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath();
+      g.strokeStyle = '#34d399'; g.lineWidth = 3; g.lineJoin = 'round'; g.stroke();
+      P.forEach(([x, y]) => { g.beginPath(); g.arc(x, y, 11, 0, 7); g.fillStyle = '#fff'; g.fill(); g.stroke(); });
+    };
+    revFit = () => {
+      const box = $('rview');
+      k = Math.min((box.clientWidth - 24) / img.width, (box.clientHeight - 24) / img.height);
+      rc.width = Math.round(img.width * k); rc.height = Math.round(img.height * k); draw();
+    };
+
+    const at = e => { const r = rc.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * img.width, y: (e.clientY - r.top) / r.height * img.height }; };
+    rc.onpointerdown = e => {
+      const p = at(e); let best = -1, bd = 28 / k;          // 28 screen px: easy to hit with a finger
+      pts.forEach((q, j) => { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = j; } });
+      drag = best; if (best >= 0) rc.setPointerCapture(e.pointerId);
+    };
+    rc.onpointermove = e => {
+      if (drag < 0) return;
+      const p = at(e);
+      pts[drag] = { x: Math.min(img.width, Math.max(0, p.x)), y: Math.min(img.height, Math.max(0, p.y)) };
+      draw();
+    };
+    rc.onpointerup = rc.onpointercancel = () => drag = -1;
+
+    const key = e => e.key === 'Escape' && finish(null);
+    const finish = v => { rev.classList.remove('on'); revFit = null; removeEventListener('keydown', key); res(v); };
+    addEventListener('keydown', key);
+    $('rskip').onclick = () => finish(null);
+    $('rfull').onclick = () => finish(false);
+    $('rok').onclick = () => finish(Object.fromEntries(KEYS.map((name, j) => [name, pts[j]])));
+
+    $('rtitle').textContent = n > 1 ? `Image ${i} of ${n} — drag the corners` : 'Drag the corners to set the crop';
+    rev.classList.add('on'); revFit(); $('rok').focus();
+  });
+}
+
+// ---- files ----
+async function addFiles(list) {
+  const files = list.filter(f => f.type.startsWith('image/')), n = files.length;
+  if (!n) return;
+  say('');
+  try {
+    if (!cvReady) busy('Loading scanner…', null, 'First time only');
+    await loadCV();
+    for (const [i, f] of files.entries()) {
+      busy(n > 1 ? `Reading image ${i + 1} of ${n}` : 'Reading image', i / n, 'Finding the page edges'); await frame();
+      const b = await createImageBitmap(f);
+      const k = Math.min(1, 2400 / Math.max(b.width, b.height)), c = document.createElement('canvas');
+      c.width = Math.round(b.width * k); c.height = Math.round(b.height * k);
+      c.getContext('2d').drawImage(b, 0, 0, c.width, c.height); b.close();
+      const quad = detect(c, 640) || inset(c.width, c.height);
+      busy(false);                                   // the crop screen takes over; show the card again afterwards
+      const r = await review(c, quad, i + 1, n);
+      if (r !== null) { busy('Cropping page…', (i + .5) / n); await frame(); await addPage(c, r); }
+    }
+  } catch (err) { say('Could not read one of the images.'); }
+  finally { busy(false); }
+}$('add0').onclick = () => $('files').click();
+$('addup').onclick = closeMenu(() => $('files').click());
+$('files').onchange = async e => { await addFiles([...e.target.files]); e.target.value = ''; };
+
+// drag & drop anywhere on the page
+addEventListener('dragover', e => { e.preventDefault(); $('empty').classList.add('over'); });
+addEventListener('dragleave', e => { if (!e.relatedTarget) $('empty').classList.remove('over'); });
+addEventListener('drop', e => { e.preventDefault(); $('empty').classList.remove('over'); addFiles([...e.dataTransfer.files]); });
+
+// ---- output ----
+$('pdf').onclick = async () => {
+  const { jsPDF } = window.jspdf, n = pages.length; let doc;
+  try {
+    for (const [i, p] of pages.entries()) {
+      busy('Building your PDF…', i / n, `Page ${i + 1} of ${n}`); await frame();
+      const c = cur(p), o = c.width > c.height ? 'l' : 'p';
+      if (i) doc.addPage('a4', o); else doc = new jsPDF({ orientation: o, unit: 'mm', format: 'a4' });
+      const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+      const k = Math.min(W / c.width, H / c.height), w = c.width * k, h = c.height * k;
+      doc.addImage(c.toDataURL('image/jpeg', .9), 'JPEG', (W - w) / 2, (H - h) / 2, w, h);
+    }
+    busy('Saving…', 1); await frame();
+    // file names can't contain \ / : * ? " < > | or control characters, nor end in a dot or space
+    doc.save(($('name').value.replace(/[\\/:*?"<>|\x00-\x1f]/g, '').trim().replace(/[. ]+$/, '') || 'scan') + '.pdf');
+  } catch (e) { say('Could not build the PDF.'); }
+  finally { busy(false); }
+};
+// ---- theme ----
+const setTheme = t => { applyTheme(t); $('theme').ariaLabel = t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'; };
+setTheme(document.documentElement.dataset.theme);
+$('theme').onclick = () => {
+  const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  setTheme(t); try { localStorage.setItem('theme', t); } catch (e) {}
+};
+matchMedia('(prefers-color-scheme: dark)').onchange = e => {      // follow the OS until the user has picked one
+  try { if (localStorage.getItem('theme')) return; } catch (e) {}
+  setTheme(e.matches ? 'dark' : 'light');
+};
+$('clear').onclick = () => {
+  if (!confirm(`Remove all ${pages.length} page${pages.length > 1 ? 's' : ''}? This can't be undone.`)) return;
+  pages.length = 0; $('name').value = ''; render(); say('');
+};
+// Pages live only in memory, so a refresh / close / back loses them: make the browser ask first (its own wording, not ours).
+addEventListener('beforeunload', e => { if (pages.length) e.preventDefault(); });
+render();
+</script>
+</body>
+</html>
+

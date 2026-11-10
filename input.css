@@ -1,0 +1,48 @@
+/* Rebuild after changing classes in index.html:
+   tailwindcss -i input.css -o tailwind.css --minify
+   then bump ?v=N on the <link> in index.html (stops browsers using a cached old tailwind.css)
+   (Tailwind standalone CLI v3.4.x: https://github.com/tailwindlabs/tailwindcss/releases)
+   Theme: index.html sets <html data-theme="light|dark"> before first paint; every colour below is a variable. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --bg: #f4f5fb; --surface: #fff; --tile: #eef0f8; --fg: #0f1220; --muted: #565d75; --line: #e2e5f0;
+  --accent: #4f46e5; --accent2: #7c3aed; --accent-soft: #ebeafe; --on: #fff; --danger: #dc2626;
+  --grad: linear-gradient(135deg, var(--accent), var(--accent2));
+  --ring: rgba(79,70,229,.22);
+  --shadow: 0 1px 2px rgba(15,18,32,.04), 0 12px 32px -10px rgba(15,18,32,.12);
+  --glow: 0 10px 24px -8px rgba(79,70,229,.55);
+}
+:root[data-theme=dark] {
+  color-scheme: dark;
+  --bg: #0a0b11; --surface: #14161f; --tile: #0d0e15; --fg: #eef0f8; --muted: #a3aac0; --line: #262a39;
+  --accent: #818cf8; --accent2: #a78bfa; --accent-soft: #1d2040; --on: #0b0c18; --danger: #f87171;
+  --ring: rgba(129,140,248,.28);
+  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 14px 36px -10px rgba(0,0,0,.6);
+  --glow: 0 10px 28px -8px rgba(129,140,248,.4);
+}
+
+@layer base {
+  body {
+    -webkit-font-smoothing: antialiased; min-height: 100vh;
+    background-image: radial-gradient(900px 380px at 50% -120px, var(--accent-soft), transparent 70%);
+    background-repeat: no-repeat;
+  }
+  [hidden] { display: none !important; } /* must beat display utilities like .flex/.grid */
+  svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+}
+
+@layer components {
+  .btn { @apply inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-2xl border border-line bg-surface px-5 font-semibold text-fg transition hover:enabled:-translate-y-px hover:enabled:shadow-card active:enabled:translate-y-0 active:enabled:scale-[.97] disabled:cursor-default disabled:opacity-45; }
+  .btn-primary { @apply border-transparent text-on shadow-glow [background-image:var(--grad)] hover:enabled:brightness-110; }
+  .btn-ghost { @apply border-transparent bg-transparent text-muted; }
+  .ib { @apply grid size-10 cursor-pointer place-items-center rounded-xl text-muted transition hover:enabled:bg-tile hover:enabled:text-fg disabled:cursor-default disabled:opacity-30; }
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+
+@media (prefers-reduced-motion: reduce) { *:not(.animate-spin) { transition: none !important; animation: none !important; } }
